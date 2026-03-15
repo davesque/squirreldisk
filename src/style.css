@@ -51,3 +51,15 @@ body {
   width: 24px !important;
   height: 20px !important;
 }
+
+.divider-handle {
+  width: 4px;
+  cursor: col-resize;
+  flex-shrink: 0;
+  background: transparent;
+  transition: background-color 0.15s;
+}
+.divider-handle:hover,
+.divider-handle:active {
+  background-color: rgba(107, 114, 128, 0.5);
+}

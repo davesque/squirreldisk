@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import diskIcon from "../assets/harddisk.png";
 import { getChart } from "../d3chart";
@@ -17,8 +17,15 @@ import { DragDropContext, Droppable } from "react-beautiful-dnd";
 import { invoke } from "@tauri-apps/api/tauri";
 import { emit, listen } from "@tauri-apps/api/event";
 import { removeFile, removeDir } from "@tauri-apps/api/fs";
+import { ContextMenu } from "./ContextMenu";
 
 (window as any).LockDNDEdgeScrolling = () => true;
+
+interface ContextMenuState {
+  x: number;
+  y: number;
+  path: string;
+}
 
 const Scanning = () => {
   let {
@@ -52,6 +59,67 @@ const Scanning = () => {
 
   const [deleteList, setDeleteList] = useState<Array<D3HierarchyDiskItem>>([]);
   const deleteMap = useRef<Map<string, boolean>>(new Map());
+
+  // Resizable divider state
+  const PANEL_STORAGE_KEY = "squirreldisk-panel-width";
+  const MIN_PANEL_PCT = 15;
+  const MAX_PANEL_PCT = 60;
+  const DEFAULT_PANEL_PCT = 33;
+
+  const [panelWidthPct, setPanelWidthPct] = useState<number>(() => {
+    const stored = localStorage.getItem(PANEL_STORAGE_KEY);
+    if (stored) {
+      const val = parseFloat(stored);
+      if (!isNaN(val) && val >= MIN_PANEL_PCT && val <= MAX_PANEL_PCT) return val;
+    }
+    return DEFAULT_PANEL_PCT;
+  });
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const isDragging = useRef(false);
+
+  const onDividerMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    isDragging.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, []);
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isDragging.current || !containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      // Panel is on the right, so its width = container right edge - mouse X
+      const pct = ((rect.right - e.clientX) / rect.width) * 100;
+      const clamped = Math.min(MAX_PANEL_PCT, Math.max(MIN_PANEL_PCT, pct));
+      setPanelWidthPct(clamped);
+    };
+    const onMouseUp = () => {
+      if (!isDragging.current) return;
+      isDragging.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+      // Persist on release
+      setPanelWidthPct((val) => {
+        localStorage.setItem(PANEL_STORAGE_KEY, String(val));
+        return val;
+      });
+    };
+    window.addEventListener("mousemove", onMouseMove);
+    window.addEventListener("mouseup", onMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", onMouseMove);
+      window.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
+
+  // Context menu state
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
+  const openContextMenu = useCallback((e: React.MouseEvent, path: string) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, path });
+  }, []);
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+
   // Avvio il worker e attendo i dati
   useEffect(() => {
     if (baseData.current) {
@@ -186,7 +254,7 @@ const Scanning = () => {
               });
             }}
           >
-            <div className="flex flex-1">
+            <div className="flex flex-1" ref={containerRef}>
               <div className="chartpartition flex-1 flex justify-items-center	items-center">
                 <svg
                   ref={svgRef}
@@ -195,11 +263,17 @@ const Scanning = () => {
                 />
               </div>
 
-              <div className="bg-gray-900 w-1/3 p-2 flex flex-col">
+              <div
+                className="divider-handle"
+                onMouseDown={onDividerMouseDown}
+              />
+
+              <div className="bg-gray-900 p-2 flex flex-col" style={{ width: `${panelWidthPct}%` }}>
                 {focusedDirectory && (
                   <ParentFolder
                     focusedDirectory={focusedDirectory}
                     d3Chart={d3Chart}
+                    onContextMenu={openContextMenu}
                   ></ParentFolder>
                 )}
                 <Droppable droppableId="filelist">
@@ -220,6 +294,7 @@ const Scanning = () => {
                             d3Chart={d3Chart}
                             index={index}
                             deleteMap={deleteMap.current}
+                            onContextMenu={openContextMenu}
                           ></FileLine>
                         ))}
 
@@ -329,6 +404,14 @@ const Scanning = () => {
             </div>
           </DragDropContext>
         </div>
+      )}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          path={contextMenu.path}
+          onClose={closeContextMenu}
+        />
       )}
     </>
   );
