@@ -11,6 +11,7 @@ interface FileLineProps {
   d3Chart: any;
   index: number;
   deleteMap: Map<string, boolean>;
+  onContextMenu: (e: React.MouseEvent, path: string) => void;
 }
 const mul = window.OS_TYPE === "Windows_NT" ? 1024 : 1000;
 export const FileLine = ({
@@ -19,6 +20,7 @@ export const FileLine = ({
   d3Chart,
   index,
   deleteMap,
+  onContextMenu,
 }: FileLineProps) => {
 
   return (
@@ -34,10 +36,7 @@ export const FileLine = ({
               ? "border border-red-800 hover:border-red-900"
               : " ")
           }
-          onContextMenu={(e) => {
-            e.preventDefault();
-            invoke("show_in_folder", { path: buildFullPath(item) });
-          }}
+          onContextMenu={(e) => onContextMenu(e, buildFullPath(item))}
           onClick={() => {
             item.children
               ? d3Chart.current.focusDirectory(
