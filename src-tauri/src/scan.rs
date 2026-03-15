@@ -63,6 +63,10 @@ pub fn start(
     let mut paths_to_scan: Vec<String> = Vec::new();
     paths_to_scan.push("--json-output".to_string());
     paths_to_scan.push("--progress".to_string());
+    // Use actual disk usage (allocated blocks) instead of apparent size,
+    // so sparse files like Docker.raw report real consumption.
+    #[cfg(not(target_os = "windows"))]
+    paths_to_scan.push("--quantity=blocks".to_string());
     paths_to_scan.push(ratio);
 
     if path.eq("/") {
@@ -255,6 +259,19 @@ pub fn stop(state: tauri::State<'_, MyState>) {
 }
 
 fn emit_scan_status(app_handle: &tauri::AppHandle, groups: Captures) {
+    let total_raw: u64 = groups
+        .get(2)
+        .map_or("0", |m| m.as_str())
+        .trim_end()
+        .parse()
+        .unwrap();
+    // With --quantity=blocks, pdu reports 512-byte block counts;
+    // convert to bytes so the progress bar can compare against disk used space.
+    #[cfg(not(target_os = "windows"))]
+    let total = total_raw * 512;
+    #[cfg(target_os = "windows")]
+    let total = total_raw;
+
     app_handle
         .emit_all(
             "scan_status",
@@ -265,12 +282,7 @@ fn emit_scan_status(app_handle: &tauri::AppHandle, groups: Captures) {
                     .trim_end()
                     .parse::<u64>()
                     .unwrap(),
-                total: groups
-                    .get(2)
-                    .map_or("0", |m| m.as_str())
-                    .trim_end()
-                    .parse::<u64>()
-                    .unwrap(),
+                total,
                 errors: groups
                     .get(3)
                     .map_or("0", |m| m.as_str())

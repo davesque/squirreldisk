@@ -133,9 +133,17 @@ const Scanning = () => {
     });
 
     const unlisten2 = listen("scan_completed", (event: any) => {
-      // event.event is the event name (useful if you want to use a single callback fn for multiple event types)
-      // event.payload is the payload object
-      baseData.current = JSON.parse(event.payload).tree;
+      const parsed = JSON.parse(event.payload);
+      // pdu with --quantity=blocks reports data as 512-byte block counts;
+      // convert to bytes so the rest of the pipeline can treat values uniformly.
+      if (parsed.unit === "blocks") {
+        const convertBlocks = (node: any) => {
+          node.data = node.data * 512;
+          if (node.children) node.children.forEach(convertBlocks);
+        };
+        convertBlocks(parsed.tree);
+      }
+      baseData.current = parsed.tree;
       const mapped = itemMap(baseData.current);
       baseDataD3Hierarchy.current = diskItemToD3Hierarchy(mapped as any);
       setView("disk");
