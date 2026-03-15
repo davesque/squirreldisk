@@ -1,5 +1,6 @@
 use std::fs;
 use std::ops::Not;
+use std::path::Path;
 
 use regex::{Captures, Regex};
 
@@ -7,6 +8,40 @@ use tauri::api::process::{Command as TauriCommand, CommandEvent};
 use tauri::Manager;
 
 use crate::MyState;
+
+/// On macOS, cloud storage directories (iCloud, Dropbox, Google Drive, etc.)
+/// cause fileproviderd to spike CPU trying to materialize file metadata.
+/// This function collects paths to scan under a directory while skipping
+/// known cloud-managed subdirectories nested inside Library/.
+#[cfg(target_os = "macos")]
+fn enumerate_skipping_cloud_dirs(dir: &Path, paths: &mut Vec<String>) {
+    let cloud_dirs = ["Mobile Documents", "CloudStorage"];
+
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let entry_path = entry.path();
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+
+        if name_str == "Library" && entry_path.is_dir() {
+            // Enumerate Library contents, skipping cloud-managed dirs
+            if let Ok(lib_entries) = fs::read_dir(&entry_path) {
+                for lib_entry in lib_entries.flatten() {
+                    let lib_name = lib_entry.file_name();
+                    if !cloud_dirs.contains(&lib_name.to_string_lossy().as_ref()) {
+                        paths.push(lib_entry.path().display().to_string());
+                    }
+                }
+            }
+        } else {
+            paths.push(entry_path.display().to_string());
+        }
+    }
+}
 
 #[derive(Clone, serde::Serialize)]
 struct Payload {
@@ -39,9 +74,29 @@ pub fn start(
 
         for scan_path in paths {
             let scan_path_str = scan_path.unwrap().path();
-            if banned.contains(&(scan_path_str.to_str().unwrap())).not() {
-                paths_to_scan.push(scan_path_str.display().to_string());
+            let path_str = scan_path_str.to_str().unwrap();
+            if banned.contains(&path_str) {
+                continue;
             }
+
+            #[cfg(target_os = "macos")]
+            {
+                // For /Users, enumerate each home directory individually
+                // to skip cloud storage dirs that cause fileproviderd to spike CPU
+                if path_str == "/Users" {
+                    if let Ok(users) = fs::read_dir("/Users") {
+                        for user_entry in users.flatten() {
+                            let user_path = user_entry.path();
+                            if user_path.is_dir() {
+                                enumerate_skipping_cloud_dirs(&user_path, &mut paths_to_scan);
+                            }
+                        }
+                    }
+                    continue;
+                }
+            }
+
+            paths_to_scan.push(scan_path_str.display().to_string());
         }
     } else {
         paths_to_scan.push(path);
